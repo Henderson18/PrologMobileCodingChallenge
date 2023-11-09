@@ -77,7 +77,7 @@ public class SummaryOrganizationController : Controller
     {
         try
         {
-            System.Threading.Thread.Sleep(1000);
+            System.Threading.Thread.Sleep(1500);
             var usersResponse = await httpClient.GetAsync($"{baseUrl}/{organizationId}/users");
             usersResponse.EnsureSuccessStatusCode();
             var usersJson = await usersResponse.Content.ReadAsStringAsync();
