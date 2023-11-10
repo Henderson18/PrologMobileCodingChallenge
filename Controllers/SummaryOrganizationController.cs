@@ -8,11 +8,14 @@ using System.Threading.Tasks;
 public class SummaryOrganizationController : Controller
 {
     private  string baseUrl = "https://607a0575bd56a60017ba2618.mockapi.io/organization";
+    private readonly ILogger<SummaryOrganizationController> _logger;
+
     private  HttpClient httpClient;
 
-    public SummaryOrganizationController(HttpClient _httpClient)
+    public SummaryOrganizationController(HttpClient _httpClient,ILogger<SummaryOrganizationController> logger)
     {
         this.httpClient = _httpClient;
+         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
     [HttpGet]
@@ -64,8 +67,9 @@ public class SummaryOrganizationController : Controller
 
                             }));
 
-                    }catch(Exception ex){                                       
-                        Console.WriteLine($"Error  organization users:  - {ex.Message} ");
+                    }catch(Exception ex){  
+                        _logger.LogError($"Error processing organization: {ex.Message}");                            
+
                     }
                summaries.Add(new SummaryOrganization
                 {
@@ -106,13 +110,13 @@ public class SummaryOrganizationController : Controller
             }
             else
             {
-                Console.WriteLine($"Error fetching users: {response.StatusCode} - {response.ReasonPhrase}");
+                 _logger.LogWarning("Operation cancelled in GetUsersInformation method.");
                 return null;
             }
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error fetching users: {ex.Message}");
+            _logger.LogError($"Error fetching user information: {ex.Message}");
             return null;
         }
         
