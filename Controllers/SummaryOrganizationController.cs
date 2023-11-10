@@ -18,11 +18,12 @@ public class SummaryOrganizationController : Controller
     [HttpGet]
     public async Task<IActionResult> GetOrganizationSummary()
     {
-        var organizations = await GetOrganizations();
+        var organizationsT =  GetOrganizations();
+        var organizations= await organizationsT;
+        
+        var summariesT = GetSummaries(organizations);
 
-        var summaries = await GetSummaries(organizations);
-
-        return Ok(summaries);
+        return Ok(Task.WhenAll(summariesT));
     }
 
     private async Task<List<Organization>> GetOrganizations()
@@ -35,70 +36,110 @@ public class SummaryOrganizationController : Controller
 
     private async Task<List<SummaryOrganization>> GetSummaries(List<Organization> organizations)
     {
-        List<SummaryOrganization> summaries = new List<SummaryOrganization>();
+        var cancellationTokenSource = new CancellationTokenSource();
+        var token = cancellationTokenSource.Token;
 
-        foreach (var organization in organizations)
+        List<SummaryOrganization> summaries = new List<SummaryOrganization>();      
+        await Task.WhenAll(organizations.Select(async requestNumber =>
         {
-            int totalBlacklistedPhones = 0;
-            int totalPhoneUser = 0;
+             int totalBlacklistedPhone=0;
+             int totalPhoneUser=0;
+             var userOrganizations= await GetUsersOrganization(requestNumber.id,token);  
 
-            var users = await GetUsersOrganization(organization.id);
+                try{
+                        await Task.WhenAll(userOrganizations.Select(async user =>
+                            {
+                               
+                             var userInfomation= await GetUsersInformation(requestNumber.id,user.id,token);
 
-            foreach (var user in users)
-            {
+                               foreach (var userInfo in userInfomation)
+                                {
 
-                var userOrganizations = await GetUsersInformation(organization.id, user.id);
-                // int number = 0;
-                foreach (var userInfo in userOrganizations)
-                {
+                                    if (userInfo.blacklisted)
+                                    {
+                                        totalBlacklistedPhone++;
+                                        totalPhoneUser++;
+                                    }
+                                }
 
-                    if (userInfo.blacklisted)
-                    {
-                        totalBlacklistedPhones++;
-                        totalPhoneUser++;
+                            }));
+
+                    }catch(Exception ex){                                       
+                        Console.WriteLine($"Error  organization users:  - {ex.Message} ");
                     }
-                }
-            }
+               summaries.Add(new SummaryOrganization
+                {
+                    id = requestNumber.id,
+                    name = requestNumber.name,
+                    totalCount = totalPhoneUser,
 
-            summaries.Add(new SummaryOrganization
-            {
-                id = organization.id,
-                name = organization.name,
-                backlistTotal = totalBlacklistedPhones,
-                totalCount = totalPhoneUser,
-                users = users,
-            });
-
-        }
+                    backlistTotal = totalBlacklistedPhone,
+                    users = userOrganizations,
+                });
+        }));
         return summaries;
     }
 
-    private async Task<List<Users>> GetUsersOrganization(string organizationId)
+    private async Task<List<Users>> GetUsersOrganization(string organizationId, CancellationToken  token)
     {
-        try
-        {
-            System.Threading.Thread.Sleep(1500);
-            var usersResponse = await httpClient.GetAsync($"{baseUrl}/{organizationId}/users");
-            usersResponse.EnsureSuccessStatusCode();
-            var usersJson = await usersResponse.Content.ReadAsStringAsync();
-            var users = JsonSerializer.Deserialize<List<Users>>(usersJson);
-            return users;
 
+         try
+        {
+               HttpResponseMessage response;
+          
+                response = await httpClient.GetAsync($"{baseUrl}/{organizationId}/users");
+                if (response.StatusCode == System.Net.HttpStatusCode.TooManyRequests) {
+                    //Console.WriteLine("Too many requests.");
+                    token.ThrowIfCancellationRequested();
+                    await Task.Delay(100, token); 
+                    return await GetUsersOrganization( organizationId,   token);
+                }
+
+            if (response.IsSuccessStatusCode)
+            {
+                var usersJson = await response.Content.ReadAsStringAsync();
+                var users = JsonSerializer.Deserialize<List<Users>>(usersJson, new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                });
+                return users;
+            }
+            else
+            {
+                Console.WriteLine($"Error fetching users: {response.StatusCode} - {response.ReasonPhrase}");
+                return null;
+            }
         }
         catch (Exception ex)
         {
             Console.WriteLine($"Error fetching users: {ex.Message}");
             return null;
         }
+        
+   
     }
 
-    private async Task<List<UserOrganization>> GetUsersInformation(string organizationId, string userId)
+    private async Task<List<UserOrganization>> GetUsersInformation(string organizationId, string userId,CancellationToken token)
     {
-        var usersResponse = await httpClient.GetAsync($"{baseUrl}/{organizationId}/users/{userId}/phones");
-        var usersJson = await usersResponse.Content.ReadAsStringAsync();
-        var users = JsonSerializer.Deserialize<List<UserOrganization>>(usersJson);
-        return users;
+        try {
+            var usersResponse = await httpClient.GetAsync($"{baseUrl}/{organizationId}/users/{userId}/phones", token);
+            var usersJson = await usersResponse.Content.ReadAsStringAsync();
+            var users = JsonSerializer.Deserialize<List<UserOrganization>>(usersJson);
+            return users;
+        }
+        catch (OperationCanceledException) {
+
+            Console.WriteLine("Operation cancelled in GetUsersInformation method.");
+            await Task.Delay(200); 
+            return await GetUsersInformation(organizationId, userId, token); 
+
+        }catch (Exception ex){
+            
+             Console.WriteLine($"Error fetching user information: {ex.Message}");
+            return null;
+         }
 
     }
+
 }
 
